@@ -1,4 +1,4 @@
-module Water
+module water
 
 go 1.25.1
 
