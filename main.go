@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -30,6 +31,15 @@ func main() {
 	fontPath := flag.String("font", "", "path to .ttf font file to use for watermark (optional)")
 	widthPercent := flag.Int("widthpercent", 30, "watermark max width as percentage of image width (1-100)")
 	flag.Parse()
+
+	// If user passed a bare font filename (e.g. "arial.ttf"), try to find it in system font dirs
+	if *fontPath != "" {
+		if filepath.Base(*fontPath) == *fontPath && !filepath.IsAbs(*fontPath) {
+			if p := findSystemFont(*fontPath); p != "" {
+				*fontPath = p
+			}
+		}
+	}
 
 	if *inPath == "" {
 		log.Fatalf("missing -in parameter\nUsage: %s -in photo.jpg|dir [-out out.jpg] [-recursive]", os.Args[0])
@@ -363,4 +373,37 @@ func splitSpaces(s string) []string {
 		out = append(out, cur)
 	}
 	return out
+}
+
+// findSystemFont searches common system font directories for the given filename (case-insensitive)
+func findSystemFont(filename string) string {
+	var dirs []string
+	switch runtime.GOOS {
+	case "windows":
+		dirs = []string{"C:\\Windows\\Fonts"}
+	case "darwin":
+		dirs = []string{"/System/Library/Fonts", "/Library/Fonts", filepath.Join(os.Getenv("HOME"), "Library/Fonts")}
+	default:
+		// linux/unix
+		dirs = []string{"/usr/share/fonts", "/usr/local/share/fonts", filepath.Join(os.Getenv("HOME"), ".fonts")}
+	}
+
+	lower := strings.ToLower(filename)
+	for _, d := range dirs {
+		fpath := filepath.Join(d, filename)
+		if _, err := os.Stat(fpath); err == nil {
+			return fpath
+		}
+		// try case-insensitive scan
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if strings.ToLower(e.Name()) == lower {
+				return filepath.Join(d, e.Name())
+			}
+		}
+	}
+	return ""
 }
