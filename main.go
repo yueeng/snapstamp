@@ -29,7 +29,7 @@ func main() {
 	margin := flag.Int("margin", 12, "margin from edges in pixels")
 	recursive := flag.Bool("recursive", false, "when input is a directory, recurse into subdirectories")
 	fontPath := flag.String("font", "arial.ttf", "path to .ttf font file to use for watermark (optional)")
-	widthPercent := flag.Int("widthpercent", 30, "watermark max width as percentage of image width (1-100)")
+	widthPercent := flag.Int("widthpercent", 25, "watermark max width as percentage of image width (1-100)")
 	flag.Parse()
 
 	// If user passed a bare font filename (e.g. "arial.ttf"), try to find it in system font dirs
@@ -138,7 +138,7 @@ func main() {
 // helper: lowercase ascii
 func stringToLower(s string) string {
 	b := []byte(s)
-	for i := 0; i < len(b); i++ {
+	for i := range b {
 		if b[i] >= 'A' && b[i] <= 'Z' {
 			b[i] = b[i] + 32
 		}
@@ -199,10 +199,7 @@ func processImage(inPath, outPath string, margin int, fontPath string, widthPerc
 	var face font.Face
 	var drawer *font.Drawer
 	imgWidth := bounds.Dx()
-	availableWidth := imgWidth * widthPercent / 100
-	if availableWidth < 10 {
-		availableWidth = 10
-	}
+	availableWidth := max(imgWidth*widthPercent/100, 10)
 
 	if fontPath != "" {
 		b, err := os.ReadFile(fontPath)
@@ -212,7 +209,7 @@ func processImage(inPath, outPath string, margin int, fontPath string, widthPerc
 				lo := 4.0
 				hi := float64(imgWidth) // arbitrary upper bound
 				var chosen font.Face
-				for iter := 0; iter < 20; iter++ {
+				for range 20 {
 					mid := (lo + hi) / 2
 					f, err := opentype.NewFace(ft, &opentype.FaceOptions{Size: mid, DPI: 72})
 					if err != nil {
@@ -255,18 +252,12 @@ func processImage(inPath, outPath string, margin int, fontPath string, widthPerc
 	lineHeight := ascent + descent
 
 	// starting y for the first (top) line of the block so that block bottom is margin above bottom
-	startY := bounds.Max.Y - margin - descent - (len(lines)-1)*lineHeight
-	if startY < ascent+margin {
-		startY = ascent + margin
-	}
+	startY := max(bounds.Max.Y-margin-descent-(len(lines)-1)*lineHeight, ascent+margin)
 
 	// draw each line right-aligned
 	for i, line := range lines {
 		textWidth := drawer.MeasureString(line).Ceil()
-		x := bounds.Max.X - textWidth - margin
-		if x < margin {
-			x = margin
-		}
+		x := max(bounds.Max.X-textWidth-margin, margin)
 		y := startY + i*lineHeight
 
 		// shadow
