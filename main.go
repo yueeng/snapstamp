@@ -24,11 +24,11 @@ import (
 )
 
 func main() {
-	inPath := flag.String("in", "", "input image path or directory (jpg/png)")
-	outPath := flag.String("out", "", "output image path (optional, only for single file)")
+	inPath := flag.String("in", ".", "input image path or directory (jpg/png)")
+	outPath := flag.String("out", ".", "output image path (optional, only for single file)")
 	margin := flag.Int("margin", 12, "margin from edges in pixels")
 	recursive := flag.Bool("recursive", false, "when input is a directory, recurse into subdirectories")
-	fontPath := flag.String("font", "", "path to .ttf font file to use for watermark (optional)")
+	fontPath := flag.String("font", "arial.ttf", "path to .ttf font file to use for watermark (optional)")
 	widthPercent := flag.Int("widthpercent", 30, "watermark max width as percentage of image width (1-100)")
 	flag.Parse()
 
@@ -272,7 +272,7 @@ func processImage(inPath, outPath string, margin int, fontPath string, widthPerc
 		// shadow
 		shadowDrawer := *drawer
 		shadowDrawer.Src = image.NewUniform(color.RGBA{0, 0, 0, 200})
-		shadowDrawer.Dot = fixed.P(x+1, y+1)
+		shadowDrawer.Dot = fixed.P(x+5, y+5)
 		shadowDrawer.DrawString(line)
 
 		// main
