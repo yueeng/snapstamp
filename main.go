@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rwcarlsen/goexif/exif"
@@ -33,6 +34,18 @@ func main() {
 
 	if *inPath == "" {
 		log.Fatalf("missing -in parameter\nUsage: %s -in photo.jpg|dir [-out out.jpg] [-recursive]", os.Args[0])
+	}
+
+	// detect if user provided -out as a directory (existing dir or trailing separator)
+	outIsDir := false
+	if *outPath != "" {
+		if st, err := os.Stat(*outPath); err == nil && st.IsDir() {
+			outIsDir = true
+		} else if strings.HasSuffix(*outPath, string(os.PathSeparator)) || strings.HasSuffix(*outPath, "/") {
+			outIsDir = true
+			// create if needed
+			os.MkdirAll(*outPath, 0755)
+		}
 	}
 
 	// Determine if input is dir or file
@@ -63,11 +76,29 @@ func main() {
 			}
 			switch stringToLower(low) {
 			case "jpg", "jpeg", "png":
-				out := filepath.Join(filepath.Dir(path), fmt.Sprintf("%s_watermarked%s", fileBase(path), ext))
-				if err := processImage(path, out, *margin, *fontPath, *fontSize, *minFontSize); err != nil {
-					log.Printf("process %s: %v", path, err)
+				if outIsDir {
+					// build relative output path under the output dir, preserving structure
+					rel, err := filepath.Rel(*inPath, path)
+					if err != nil {
+						rel = filepath.Base(path)
+					}
+					relDir := filepath.Dir(rel)
+					destDir := filepath.Join(*outPath, relDir)
+					os.MkdirAll(destDir, 0755)
+					base := fileBase(path)
+					out := filepath.Join(destDir, fmt.Sprintf("%s_watermarked%s", base, ext))
+					if err := processImage(path, out, *margin, *fontPath, *fontSize, *minFontSize); err != nil {
+						log.Printf("process %s: %v", path, err)
+					} else {
+						fmt.Printf("wrote %s\n", out)
+					}
 				} else {
-					fmt.Printf("wrote %s\n", out)
+					out := filepath.Join(filepath.Dir(path), fmt.Sprintf("%s_watermarked%s", fileBase(path), ext))
+					if err := processImage(path, out, *margin, *fontPath, *fontSize, *minFontSize); err != nil {
+						log.Printf("process %s: %v", path, err)
+					} else {
+						fmt.Printf("wrote %s\n", out)
+					}
 				}
 			}
 			return nil
@@ -82,6 +113,12 @@ func main() {
 		ext := filepath.Ext(*inPath)
 		name := (*inPath)[:len(*inPath)-len(ext)]
 		out = fmt.Sprintf("%s_watermarked%s", name, ext)
+	} else if outIsDir {
+		// place output inside specified directory
+		ext := filepath.Ext(*inPath)
+		base := fileBase(*inPath)
+		os.MkdirAll(out, 0755)
+		out = filepath.Join(out, fmt.Sprintf("%s_watermarked%s", base, ext))
 	}
 	if err := processImage(*inPath, out, *margin, *fontPath, *fontSize, *minFontSize); err != nil {
 		log.Fatalf("process image: %v", err)
