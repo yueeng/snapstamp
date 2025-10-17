@@ -28,8 +28,7 @@ func main() {
 	margin := flag.Int("margin", 12, "margin from edges in pixels")
 	recursive := flag.Bool("recursive", false, "when input is a directory, recurse into subdirectories")
 	fontPath := flag.String("font", "", "path to .ttf font file to use for watermark (optional)")
-	fontSize := flag.Int("fontsize", 24, "initial font size in points when using TTF")
-	minFontSize := flag.Int("minfontsize", 10, "minimum font size to scale down to")
+	widthPercent := flag.Int("widthpercent", 30, "watermark max width as percentage of image width (1-100)")
 	flag.Parse()
 
 	if *inPath == "" {
@@ -87,14 +86,14 @@ func main() {
 					os.MkdirAll(destDir, 0755)
 					base := fileBase(path)
 					out := filepath.Join(destDir, fmt.Sprintf("%s_watermarked%s", base, ext))
-					if err := processImage(path, out, *margin, *fontPath, *fontSize, *minFontSize); err != nil {
+					if err := processImage(path, out, *margin, *fontPath, *widthPercent); err != nil {
 						log.Printf("process %s: %v", path, err)
 					} else {
 						fmt.Printf("wrote %s\n", out)
 					}
 				} else {
 					out := filepath.Join(filepath.Dir(path), fmt.Sprintf("%s_watermarked%s", fileBase(path), ext))
-					if err := processImage(path, out, *margin, *fontPath, *fontSize, *minFontSize); err != nil {
+					if err := processImage(path, out, *margin, *fontPath, *widthPercent); err != nil {
 						log.Printf("process %s: %v", path, err)
 					} else {
 						fmt.Printf("wrote %s\n", out)
@@ -120,7 +119,7 @@ func main() {
 		os.MkdirAll(out, 0755)
 		out = filepath.Join(out, fmt.Sprintf("%s_watermarked%s", base, ext))
 	}
-	if err := processImage(*inPath, out, *margin, *fontPath, *fontSize, *minFontSize); err != nil {
+	if err := processImage(*inPath, out, *margin, *fontPath, *widthPercent); err != nil {
 		log.Fatalf("process image: %v", err)
 	}
 	fmt.Printf("wrote %s\n", out)
@@ -144,7 +143,7 @@ func fileBase(path string) string {
 }
 
 // processImage reads input, extracts date, wraps text if needed, draws multi-line watermark, and writes output
-func processImage(inPath, outPath string, margin int, fontPath string, fontSize int, minFontSize int) error {
+func processImage(inPath, outPath string, margin int, fontPath string, widthPercent int) error {
 	data, err := os.ReadFile(inPath)
 	if err != nil {
 		return fmt.Errorf("read input: %w", err)
@@ -186,10 +185,11 @@ func processImage(inPath, outPath string, margin int, fontPath string, fontSize 
 	rgba := image.NewRGBA(bounds)
 	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
 
-	// determine font face: if TTF provided, try opentype and dynamic scaling; otherwise fallback to basicfont
+	// determine font face: if TTF provided, choose size so that text width <= widthPercent% of image width
 	var face font.Face
 	var drawer *font.Drawer
-	availableWidth := bounds.Dx() - 2*margin
+	imgWidth := bounds.Dx()
+	availableWidth := imgWidth * widthPercent / 100
 	if availableWidth < 10 {
 		availableWidth = 10
 	}
@@ -198,22 +198,36 @@ func processImage(inPath, outPath string, margin int, fontPath string, fontSize 
 		b, err := os.ReadFile(fontPath)
 		if err == nil {
 			if ft, err := opentype.Parse(b); err == nil {
-				fs := float64(fontSize)
-				for fs >= float64(minFontSize) {
-					if f, err := opentype.NewFace(ft, &opentype.FaceOptions{Size: fs, DPI: 72}); err == nil {
-						tmpDrawer := &font.Drawer{Dst: rgba, Src: image.NewUniform(color.RGBA{255, 255, 255, 220}), Face: f}
-						lines := wrapText(tmpDrawer, dateStr, availableWidth)
-						metrics := f.Metrics()
-						ascent := metrics.Ascent.Ceil()
-						descent := metrics.Descent.Ceil()
-						lineHeight := ascent + descent
-						if len(lines)*lineHeight <= (bounds.Dy() - 2*margin) {
-							face = f
-							drawer = tmpDrawer
-							break
+				// binary search font size in points
+				lo := 4.0
+				hi := float64(imgWidth) // arbitrary upper bound
+				var chosen font.Face
+				for iter := 0; iter < 20; iter++ {
+					mid := (lo + hi) / 2
+					f, err := opentype.NewFace(ft, &opentype.FaceOptions{Size: mid, DPI: 72})
+					if err != nil {
+						hi = mid
+						continue
+					}
+					tmpDrawer := &font.Drawer{Dst: rgba, Src: image.NewUniform(color.RGBA{255, 255, 255, 220}), Face: f}
+					lines := wrapText(tmpDrawer, dateStr, availableWidth)
+					maxW := 0
+					for _, L := range lines {
+						w := tmpDrawer.MeasureString(L).Ceil()
+						if w > maxW {
+							maxW = w
 						}
 					}
-					fs -= 1.5
+					if maxW <= availableWidth {
+						chosen = f
+						lo = mid
+					} else {
+						hi = mid
+					}
+				}
+				if chosen != nil {
+					face = chosen
+					drawer = &font.Drawer{Dst: rgba, Src: image.NewUniform(color.RGBA{255, 255, 255, 220}), Face: face}
 				}
 			}
 		}
