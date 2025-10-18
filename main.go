@@ -30,6 +30,7 @@ func main() {
 	recursive := flag.Bool("recursive", false, "when input is a directory, recurse into subdirectories")
 	fontPath := flag.String("font", "arial.ttf", "path to .ttf font file to use for watermark (optional)")
 	widthPercent := flag.Int("widthpercent", 40, "watermark max width as percentage of image width (1-100)")
+	rename := flag.Bool("rename", false, "rename output file to EXIF capture time (as filename)")
 	flag.Parse()
 
 	// If user passed a bare font filename (e.g. "arial.ttf"), try to find it in system font dirs
@@ -96,17 +97,17 @@ func main() {
 					os.MkdirAll(destDir, 0755)
 					base := fileBase(path)
 					out := filepath.Join(destDir, fmt.Sprintf("%s_watermarked%s", base, ext))
-					if err := processImage(path, out, *marginPercent, *fontPath, *widthPercent); err != nil {
+					if outFile, err := processImage(path, out, *marginPercent, *fontPath, *widthPercent, *rename); err != nil {
 						log.Printf("process %s: %v", path, err)
 					} else {
-						fmt.Printf("wrote %s\n", out)
+						fmt.Printf("wrote %s\n", outFile)
 					}
 				} else {
 					out := filepath.Join(filepath.Dir(path), fmt.Sprintf("%s_watermarked%s", fileBase(path), ext))
-					if err := processImage(path, out, *marginPercent, *fontPath, *widthPercent); err != nil {
+					if outFile, err := processImage(path, out, *marginPercent, *fontPath, *widthPercent, *rename); err != nil {
 						log.Printf("process %s: %v", path, err)
 					} else {
-						fmt.Printf("wrote %s\n", out)
+						fmt.Printf("wrote %s\n", outFile)
 					}
 				}
 			}
@@ -129,10 +130,11 @@ func main() {
 		os.MkdirAll(out, 0755)
 		out = filepath.Join(out, fmt.Sprintf("%s_watermarked%s", base, ext))
 	}
-	if err := processImage(*inPath, out, *marginPercent, *fontPath, *widthPercent); err != nil {
+	if outFile, err := processImage(*inPath, out, *marginPercent, *fontPath, *widthPercent, *rename); err != nil {
 		log.Fatalf("process image: %v", err)
+	} else {
+		fmt.Printf("wrote %s\n", outFile)
 	}
-	fmt.Printf("wrote %s\n", out)
 }
 
 // helper: lowercase ascii
@@ -153,10 +155,14 @@ func fileBase(path string) string {
 }
 
 // processImage reads input, extracts date, wraps text if needed, draws multi-line watermark, and writes output
-func processImage(inPath, outPath string, marginPercent int, fontPath string, widthPercent int) error {
+// processImage reads input, extracts date, draws watermark, and writes output.
+// If rename is true, the output filename (inside outPath's directory) will be replaced
+// with a safe filename derived from the EXIF capture time.
+// Returns the actual written output path on success.
+func processImage(inPath, outPath string, marginPercent int, fontPath string, widthPercent int, rename bool) (string, error) {
 	data, err := os.ReadFile(inPath)
 	if err != nil {
-		return fmt.Errorf("read input: %w", err)
+		return "", fmt.Errorf("read input: %w", err)
 	}
 
 	// Try to read EXIF
@@ -188,7 +194,7 @@ func processImage(inPath, outPath string, marginPercent int, fontPath string, wi
 
 	img, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("decode image: %w", err)
+		return "", fmt.Errorf("decode image: %w", err)
 	}
 
 	bounds := img.Bounds()
@@ -287,24 +293,75 @@ func processImage(inPath, outPath string, marginPercent int, fontPath string, wi
 		drawer.DrawString(line)
 	}
 
-	of, err := os.Create(outPath)
+	// determine final output path
+	ext := filepath.Ext(outPath)
+	outDir := filepath.Dir(outPath)
+	finalOut := outPath
+	if rename {
+		// build safe filename from dateStr: replace spaces with '_' and ':' with '-'
+		dateForFile := strings.ReplaceAll(dateStr, " ", "_")
+		dateForFile = strings.ReplaceAll(dateForFile, ":", "-")
+		dateForFile = safeFilename(dateForFile)
+		if dateForFile == "" {
+			dateForFile = "unknown_date"
+		}
+		candidate := filepath.Join(outDir, dateForFile+ext)
+		// if exists, add numeric suffix
+		finalOut = uniquePath(candidate)
+	} else {
+		finalOut = uniquePath(outPath)
+	}
+
+	of, err := os.Create(finalOut)
 	if err != nil {
-		return fmt.Errorf("create output: %w", err)
+		return "", fmt.Errorf("create output: %w", err)
 	}
 	defer of.Close()
 
 	switch format {
 	case "png":
 		if err := png.Encode(of, rgba); err != nil {
-			return fmt.Errorf("encode png: %w", err)
+			return "", fmt.Errorf("encode png: %w", err)
 		}
 	default:
 		opts := &jpeg.Options{Quality: 95}
 		if err := jpeg.Encode(of, rgba, opts); err != nil {
-			return fmt.Errorf("encode jpeg: %w", err)
+			return "", fmt.Errorf("encode jpeg: %w", err)
 		}
 	}
-	return nil
+	return finalOut, nil
+}
+
+// safeFilename replaces characters unsafe for filenames with underscores and keeps common safe chars.
+func safeFilename(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		// allow letters, numbers, dash, underscore, and dot
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
+// uniquePath returns a path that does not exist by appending _1, _2, ... when needed.
+func uniquePath(p string) string {
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		return p
+	}
+	dir := filepath.Dir(p)
+	base := fileBase(p)
+	ext := filepath.Ext(p)
+	for i := 1; i < 10000; i++ {
+		cand := filepath.Join(dir, fmt.Sprintf("%s_%d%s", base, i, ext))
+		if _, err := os.Stat(cand); os.IsNotExist(err) {
+			return cand
+		}
+	}
+	// fallback: return original (will likely overwrite)
+	return p
 }
 
 func normalizeExifDate(s string) string {
