@@ -264,14 +264,25 @@ func processImage(inPath, outPath string, marginPercent int, fontPath string, wi
 		x := max(bounds.Max.X-textWidth-pixelMargin, pixelMargin)
 		y := startY + i*lineHeight
 
-		// shadow
-		shadowDrawer := *drawer
-		shadowDrawer.Src = image.NewUniform(color.RGBA{0, 0, 0, 200})
-		shadowDrawer.Dot = fixed.P(x+1, y+1)
-		shadowDrawer.DrawString(line)
+		// draw white outline by drawing the text multiple times around the center
+		// outline thickness scales with font size
+		outlinePx := max(lineHeight/20, 1)
+		drawerOrig := *drawer
+		for ox := -outlinePx; ox <= outlinePx; ox++ {
+			for oy := -outlinePx; oy <= outlinePx; oy++ {
+				// skip center (will be drawn as main text)
+				if ox == 0 && oy == 0 {
+					continue
+				}
+				d := drawerOrig
+				d.Src = image.NewUniform(color.RGBA{255, 255, 255, 255})
+				d.Dot = fixed.P(x+ox, y+oy)
+				d.DrawString(line)
+			}
+		}
 
-		// main
-		drawer.Src = image.NewUniform(color.RGBA{255, 255, 255, 230})
+		// main fill (black)
+		drawer.Src = image.NewUniform(color.RGBA{0, 0, 0, 255})
 		drawer.Dot = fixed.P(x, y)
 		drawer.DrawString(line)
 	}
