@@ -263,7 +263,7 @@ func processImage(inPath, outPath string, margin int, fontPath string, widthPerc
 		// shadow
 		shadowDrawer := *drawer
 		shadowDrawer.Src = image.NewUniform(color.RGBA{0, 0, 0, 200})
-		shadowDrawer.Dot = fixed.P(x+5, y+5)
+		shadowDrawer.Dot = fixed.P(x+1, y+1)
 		shadowDrawer.DrawString(line)
 
 		// main
