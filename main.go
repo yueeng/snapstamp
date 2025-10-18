@@ -26,10 +26,10 @@ import (
 func main() {
 	inPath := flag.String("in", ".", "input image path or directory (jpg/png)")
 	outPath := flag.String("out", ".", "output image path (optional, only for single file)")
-	margin := flag.Int("margin", 12, "margin from edges in pixels")
+	marginPercent := flag.Int("margin", 5, "margin from edges as percentage of the smaller image dimension")
 	recursive := flag.Bool("recursive", false, "when input is a directory, recurse into subdirectories")
 	fontPath := flag.String("font", "arial.ttf", "path to .ttf font file to use for watermark (optional)")
-	widthPercent := flag.Int("widthpercent", 25, "watermark max width as percentage of image width (1-100)")
+	widthPercent := flag.Int("widthpercent", 40, "watermark max width as percentage of image width (1-100)")
 	flag.Parse()
 
 	// If user passed a bare font filename (e.g. "arial.ttf"), try to find it in system font dirs
@@ -96,14 +96,14 @@ func main() {
 					os.MkdirAll(destDir, 0755)
 					base := fileBase(path)
 					out := filepath.Join(destDir, fmt.Sprintf("%s_watermarked%s", base, ext))
-					if err := processImage(path, out, *margin, *fontPath, *widthPercent); err != nil {
+					if err := processImage(path, out, *marginPercent, *fontPath, *widthPercent); err != nil {
 						log.Printf("process %s: %v", path, err)
 					} else {
 						fmt.Printf("wrote %s\n", out)
 					}
 				} else {
 					out := filepath.Join(filepath.Dir(path), fmt.Sprintf("%s_watermarked%s", fileBase(path), ext))
-					if err := processImage(path, out, *margin, *fontPath, *widthPercent); err != nil {
+					if err := processImage(path, out, *marginPercent, *fontPath, *widthPercent); err != nil {
 						log.Printf("process %s: %v", path, err)
 					} else {
 						fmt.Printf("wrote %s\n", out)
@@ -129,7 +129,7 @@ func main() {
 		os.MkdirAll(out, 0755)
 		out = filepath.Join(out, fmt.Sprintf("%s_watermarked%s", base, ext))
 	}
-	if err := processImage(*inPath, out, *margin, *fontPath, *widthPercent); err != nil {
+	if err := processImage(*inPath, out, *marginPercent, *fontPath, *widthPercent); err != nil {
 		log.Fatalf("process image: %v", err)
 	}
 	fmt.Printf("wrote %s\n", out)
@@ -153,7 +153,7 @@ func fileBase(path string) string {
 }
 
 // processImage reads input, extracts date, wraps text if needed, draws multi-line watermark, and writes output
-func processImage(inPath, outPath string, margin int, fontPath string, widthPercent int) error {
+func processImage(inPath, outPath string, marginPercent int, fontPath string, widthPercent int) error {
 	data, err := os.ReadFile(inPath)
 	if err != nil {
 		return fmt.Errorf("read input: %w", err)
@@ -250,14 +250,18 @@ func processImage(inPath, outPath string, margin int, fontPath string, widthPerc
 	ascent := metrics.Ascent.Ceil()
 	descent := metrics.Descent.Ceil()
 	lineHeight := ascent + descent
+	// convert marginPercent to pixel margin using the smaller image dimension
+	imgHeight := bounds.Dy()
+	smaller := min(imgWidth, imgHeight)
+	pixelMargin := max(smaller*marginPercent/100, 1)
 
-	// starting y for the first (top) line of the block so that block bottom is margin above bottom
-	startY := max(bounds.Max.Y-margin-descent-(len(lines)-1)*lineHeight, ascent+margin)
+	// starting y for the first (top) line of the block so that block bottom is pixelMargin above bottom
+	startY := max(bounds.Max.Y-pixelMargin-descent-(len(lines)-1)*lineHeight, ascent+pixelMargin)
 
 	// draw each line right-aligned
 	for i, line := range lines {
 		textWidth := drawer.MeasureString(line).Ceil()
-		x := max(bounds.Max.X-textWidth-margin, margin)
+		x := max(bounds.Max.X-textWidth-pixelMargin, pixelMargin)
 		y := startY + i*lineHeight
 
 		// shadow
