@@ -329,7 +329,38 @@ func processImage(inPath, outPath string, marginPercent int, fontPath string, wi
 			return "", fmt.Errorf("encode jpeg: %w", err)
 		}
 	}
+	// Try to set file times to EXIF capture time on Windows
+	if runtime.GOOS == "windows" {
+		if t, err := parseExifTime(dateStr); err == nil {
+			if err := os.Chtimes(finalOut, t, t); err != nil {
+				log.Printf("failed to set file times for %s: %v", finalOut, err)
+			}
+		} else {
+			log.Printf("failed to parse exif date '%s': %v", dateStr, err)
+		}
+	}
+
 	return finalOut, nil
+}
+
+// parseExifTime tries several common layouts to parse the normalized EXIF date string.
+func parseExifTime(s string) (time.Time, error) {
+	// try common layouts
+	layouts := []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02_15-04-05",
+		"2006-01-02",
+		time.RFC3339,
+	}
+	var lastErr error
+	for _, l := range layouts {
+		if t, err := time.ParseInLocation(l, s, time.Local); err == nil {
+			return t, nil
+		} else {
+			lastErr = err
+		}
+	}
+	return time.Time{}, lastErr
 }
 
 // safeFilename replaces characters unsafe for filenames with underscores and keeps common safe chars.
