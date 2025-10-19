@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"flag"
 	"fmt"
 	"image"
 	"image/color"
@@ -16,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	flag "github.com/spf13/pflag"
+
 	"github.com/rwcarlsen/goexif/exif"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
@@ -24,14 +25,19 @@ import (
 )
 
 func main() {
-	inPath := flag.String("in", ".", "input image path or directory (jpg/png)")
-	outPath := flag.String("out", ".", "output image path (optional, only for single file)")
-	marginPercent := flag.Int("margin", 5, "margin from edges as percentage of the smaller image dimension")
-	recursive := flag.Bool("recursive", false, "when input is a directory, recurse into subdirectories")
-	fontPath := flag.String("font", "arial.ttf", "path to .ttf font file to use for watermark (optional)")
-	widthPercent := flag.Int("widthpercent", 40, "watermark max width as percentage of image width (1-100)")
-	rename := flag.Bool("rename", false, "rename output file to EXIF capture time (as filename)")
+	inPath := flag.StringP("in", "i", ".", "input image path or directory (jpg/png)")
+	outPath := flag.StringP("out", "o", ".", "output image path (optional, only for single file)")
+	marginPercent := flag.IntP("margin", "m", 5, "margin from edges as percentage of the smaller image dimension")
+	recursive := flag.BoolP("recursive", "r", false, "when input is a directory, recurse into subdirectories")
+	fontPath := flag.StringP("font", "f", "arial.ttf", "path to .ttf font file to use for watermark (optional)")
+	widthPercent := flag.IntP("widthpercent", "w", 40, "watermark max width as percentage of image width (1-100)")
+	rename := flag.BoolP("rename", "n", false, "rename output file to EXIF capture time (as filename)")
+	help := flag.BoolP("help", "?", false, "display help")
 	flag.Parse()
+	if *help {
+		flag.Usage()
+		return
+	}
 
 	// If user passed a bare font filename (e.g. "arial.ttf"), try to find it in system font dirs
 	if *fontPath != "" {
