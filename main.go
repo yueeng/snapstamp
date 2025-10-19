@@ -32,6 +32,7 @@ func main() {
 	fontPath := flag.StringP("font", "f", "arial.ttf", "path to .ttf font file to use for watermark (optional)")
 	widthPercent := flag.IntP("widthpercent", "w", 40, "watermark max width as percentage of image width (1-100)")
 	rename := flag.BoolP("rename", "n", false, "rename output file to EXIF capture time (as filename)")
+	concurrency := flag.IntP("concurrency", "c", runtime.NumCPU(), "number of concurrent workers when processing a directory")
 	help := flag.BoolP("help", "?", false, "display help")
 	flag.Parse()
 	if *help {
@@ -71,7 +72,8 @@ func main() {
 		if err := os.MkdirAll(*outPath, 0755); err != nil {
 			log.Fatalf("create out dir: %v", err)
 		}
-		// walk directory and process images
+		// walk directory and collect images to process
+		var files []string
 		walkFn := func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return nil
@@ -92,30 +94,7 @@ func main() {
 			}
 			switch strings.ToLower(low) {
 			case "jpg", "jpeg", "png":
-				if outIsDir {
-					// build relative output path under the output dir, preserving structure
-					rel, err := filepath.Rel(*inPath, path)
-					if err != nil {
-						rel = filepath.Base(path)
-					}
-					relDir := filepath.Dir(rel)
-					destDir := filepath.Join(*outPath, relDir)
-					os.MkdirAll(destDir, 0755)
-					base := fileBase(path)
-					out := filepath.Join(destDir, fmt.Sprintf("%s_watermarked%s", base, ext))
-					if outFile, err := processImage(path, out, *marginPercent, *fontPath, *widthPercent, *rename); err != nil {
-						log.Printf("process %s: %v", path, err)
-					} else {
-						fmt.Printf("wrote %s\n", outFile)
-					}
-				} else {
-					out := filepath.Join(filepath.Dir(path), fmt.Sprintf("%s_watermarked%s", fileBase(path), ext))
-					if outFile, err := processImage(path, out, *marginPercent, *fontPath, *widthPercent, *rename); err != nil {
-						log.Printf("process %s: %v", path, err)
-					} else {
-						fmt.Printf("wrote %s\n", outFile)
-					}
-				}
+				files = append(files, path)
 			}
 			return nil
 		}
@@ -129,6 +108,74 @@ func main() {
 		}); err != nil {
 			log.Fatalf("walkdir failed: %v", err)
 		}
+
+		// If no files found, exit
+		if len(files) == 0 {
+			fmt.Println("no images found")
+			return
+		}
+
+		// Worker pool to process files concurrently
+		jobs := make(chan string)
+		results := make(chan struct {
+			out string
+			err error
+		})
+
+		worker := func() {
+			for p := range jobs {
+				// construct out path preserving relative structure
+				rel, err := filepath.Rel(*inPath, p)
+				if err != nil {
+					rel = filepath.Base(p)
+				}
+				relDir := filepath.Dir(rel)
+				destDir := filepath.Join(*outPath, relDir)
+				if err := os.MkdirAll(destDir, 0755); err != nil {
+					results <- struct {
+						out string
+						err error
+					}{"", fmt.Errorf("mkdir dest: %w", err)}
+					continue
+				}
+				ext := filepath.Ext(p)
+				base := fileBase(p)
+				out := filepath.Join(destDir, fmt.Sprintf("%s_watermarked%s", base, ext))
+				outFile, err := processImage(p, out, *marginPercent, *fontPath, *widthPercent, *rename)
+				results <- struct {
+					out string
+					err error
+				}{outFile, err}
+			}
+		}
+
+		// start workers
+		n := *concurrency
+		if n <= 0 {
+			n = 1
+		}
+		for i := 0; i < n; i++ {
+			go worker()
+		}
+
+		// dispatch jobs
+		go func() {
+			for _, p := range files {
+				jobs <- p
+			}
+			close(jobs)
+		}()
+
+		// collect results
+		for i := 0; i < len(files); i++ {
+			res := <-results
+			if res.err != nil {
+				log.Printf("process: %v", res.err)
+			} else {
+				fmt.Printf("wrote %s\n", res.out)
+			}
+		}
+		return
 		return
 	}
 
