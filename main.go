@@ -453,15 +453,13 @@ func processImage(inPath, outPath string, marginPercent int, fontFT *opentype.Fo
 			return "", fmt.Errorf("encode jpeg: %w", err)
 		}
 	}
-	// Try to set file times to EXIF capture time on Windows
-	if runtime.GOOS == "windows" {
-		if t, err := parseExifTime(dateStr); err == nil {
-			if err := os.Chtimes(finalOut, t, t); err != nil {
-				log.Printf("failed to set file times for %s: %v", finalOut, err)
-			}
-		} else {
-			log.Printf("failed to parse exif date '%s': %v", dateStr, err)
+	// Try to set file times to EXIF capture time (attempt on all platforms).
+	if t, err := parseExifTime(dateStr); err == nil {
+		if err := os.Chtimes(finalOut, t, t); err != nil {
+			log.Printf("failed to set file times for %s: %v", finalOut, err)
 		}
+	} else {
+		log.Printf("failed to parse exif date '%s': %v", dateStr, err)
 	}
 
 	return finalOut, nil
