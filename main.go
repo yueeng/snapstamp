@@ -1,13 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -217,14 +217,16 @@ func fileBase(path string) string {
 // with a safe filename derived from the EXIF capture time.
 // Returns the actual written output path on success.
 func processImage(inPath, outPath string, marginPercent int, fontPath string, widthPercent int, rename bool) (string, error) {
-	data, err := os.ReadFile(inPath)
+	// Open file once and use stream for EXIF and image decoding to avoid reading whole file into memory
+	f, err := os.Open(inPath)
 	if err != nil {
-		return "", fmt.Errorf("read input: %w", err)
+		return "", fmt.Errorf("open input: %w", err)
 	}
+	defer f.Close()
 
 	// Try to read EXIF
 	dateStr := ""
-	if ex, err := exif.Decode(bytes.NewReader(data)); err == nil {
+	if ex, err := exif.Decode(f); err == nil {
 		if tag, err := ex.Get(exif.DateTimeOriginal); err == nil && tag != nil {
 			if s, err := tag.StringVal(); err == nil {
 				dateStr = s
@@ -249,7 +251,12 @@ func processImage(inPath, outPath string, marginPercent int, fontPath string, wi
 	}
 	dateStr = normalizeExifDate(dateStr)
 
-	img, format, err := image.Decode(bytes.NewReader(data))
+	// seek back to beginning for image decoding
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("seek input: %w", err)
+	}
+
+	img, format, err := image.Decode(f)
 	if err != nil {
 		return "", fmt.Errorf("decode image: %w", err)
 	}
