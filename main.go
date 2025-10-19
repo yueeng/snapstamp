@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -10,9 +11,12 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -39,6 +43,17 @@ func main() {
 		flag.Usage()
 		return
 	}
+
+	// context for graceful shutdown on Ctrl+C
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		log.Printf("signal received, shutting down...")
+		cancel()
+	}()
 
 	// If user passed a bare font filename (e.g. "arial.ttf"), try to find it in system font dirs
 	if *fontPath != "" {
@@ -78,6 +93,13 @@ func main() {
 			if err != nil {
 				return nil
 			}
+
+			// stop walking if context cancelled
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 			if d.IsDir() {
 				if path == *inPath {
 					return nil
@@ -106,7 +128,12 @@ func main() {
 			}
 			return walkFn(path, d, nil)
 		}); err != nil {
-			log.Fatalf("walkdir failed: %v", err)
+			if err == context.Canceled {
+				log.Printf("walk cancelled")
+				// proceed with whatever files were collected
+			} else {
+				log.Fatalf("walkdir failed: %v", err)
+			}
 		}
 
 		// If no files found, exit
@@ -115,15 +142,27 @@ func main() {
 			return
 		}
 
-		// Worker pool to process files concurrently
+		// Worker pool to process files concurrently, respond to cancellation
 		jobs := make(chan string)
 		results := make(chan struct {
 			out string
 			err error
 		})
+		var wg sync.WaitGroup
 
 		worker := func() {
+			defer wg.Done()
 			for p := range jobs {
+				// respect cancellation
+				select {
+				case <-ctx.Done():
+					results <- struct {
+						out string
+						err error
+					}{"", ctx.Err()}
+					return
+				default:
+				}
 				// construct out path preserving relative structure
 				rel, err := filepath.Rel(*inPath, p)
 				if err != nil {
@@ -154,21 +193,32 @@ func main() {
 		if n <= 0 {
 			n = 1
 		}
+		wg.Add(n)
 		for i := 0; i < n; i++ {
 			go worker()
 		}
 
-		// dispatch jobs
+		// dispatch jobs; stop dispatching if cancelled
 		go func() {
+			defer close(jobs)
 			for _, p := range files {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 				jobs <- p
 			}
-			close(jobs)
 		}()
 
-		// collect results
-		for i := 0; i < len(files); i++ {
-			res := <-results
+		// close results when all workers finish
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		// collect results until workers are done or cancelled
+		for res := range results {
 			if res.err != nil {
 				log.Printf("process: %v", res.err)
 			} else {
