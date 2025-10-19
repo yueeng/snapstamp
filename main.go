@@ -64,6 +64,20 @@ func main() {
 		}
 	}
 
+	// parse and cache TTF font once (so we don't re-read/parse for every image)
+	var parsedFont *opentype.Font
+	if *fontPath != "" {
+		if b, err := os.ReadFile(*fontPath); err == nil {
+			if ft, err := opentype.Parse(b); err == nil {
+				parsedFont = ft
+			} else {
+				log.Printf("warning: failed to parse font %s: %v", *fontPath, err)
+			}
+		} else {
+			log.Printf("warning: failed to read font %s: %v", *fontPath, err)
+		}
+	}
+
 	if *inPath == "" {
 		log.Fatalf("missing -in parameter\nUsage: %s -in photo.jpg|dir [-out out.jpg] [-recursive]", os.Args[0])
 	}
@@ -144,10 +158,16 @@ func main() {
 
 		// Worker pool to process files concurrently, respond to cancellation
 		jobs := make(chan string)
+		// determine number of workers
+		n := *concurrency
+		if n <= 0 {
+			n = 1
+		}
+		// buffered results channel reduces the risk of worker goroutines blocking
 		results := make(chan struct {
 			out string
 			err error
-		})
+		}, n*2)
 		var wg sync.WaitGroup
 
 		worker := func() {
@@ -180,7 +200,7 @@ func main() {
 				ext := filepath.Ext(p)
 				base := fileBase(p)
 				out := filepath.Join(destDir, fmt.Sprintf("%s_watermarked%s", base, ext))
-				outFile, err := processImage(p, out, *marginPercent, *fontPath, *widthPercent, *rename)
+				outFile, err := processImage(p, out, *marginPercent, parsedFont, *widthPercent, *rename)
 				results <- struct {
 					out string
 					err error
@@ -189,10 +209,6 @@ func main() {
 		}
 
 		// start workers
-		n := *concurrency
-		if n <= 0 {
-			n = 1
-		}
 		wg.Add(n)
 		for i := 0; i < n; i++ {
 			go worker()
@@ -226,7 +242,6 @@ func main() {
 			}
 		}
 		return
-		return
 	}
 
 	// single file
@@ -242,7 +257,7 @@ func main() {
 		os.MkdirAll(out, 0755)
 		out = filepath.Join(out, fmt.Sprintf("%s_watermarked%s", base, ext))
 	}
-	if outFile, err := processImage(*inPath, out, *marginPercent, *fontPath, *widthPercent, *rename); err != nil {
+	if outFile, err := processImage(*inPath, out, *marginPercent, parsedFont, *widthPercent, *rename); err != nil {
 		log.Fatalf("process image: %v", err)
 	} else {
 		fmt.Printf("wrote %s\n", outFile)
@@ -266,7 +281,7 @@ func fileBase(path string) string {
 // If rename is true, the output filename (inside outPath's directory) will be replaced
 // with a safe filename derived from the EXIF capture time.
 // Returns the actual written output path on success.
-func processImage(inPath, outPath string, marginPercent int, fontPath string, widthPercent int, rename bool) (string, error) {
+func processImage(inPath, outPath string, marginPercent int, fontFT *opentype.Font, widthPercent int, rename bool) (string, error) {
 	// Open file once and use stream for EXIF and image decoding to avoid reading whole file into memory
 	f, err := os.Open(inPath)
 	if err != nil {
@@ -315,49 +330,43 @@ func processImage(inPath, outPath string, marginPercent int, fontPath string, wi
 	rgba := image.NewRGBA(bounds)
 	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
 
-	// determine font face: if TTF provided, choose size so that text width <= widthPercent% of image width
+	// determine font face: if a parsed TTF font is provided, choose size so that text width <= widthPercent% of image width
 	var face font.Face
 	var drawer *font.Drawer
 	imgWidth := bounds.Dx()
 	availableWidth := max(imgWidth*widthPercent/100, 10)
 
-	if fontPath != "" {
-		b, err := os.ReadFile(fontPath)
-		if err == nil {
-			if ft, err := opentype.Parse(b); err == nil {
-				// binary search font size in points
-				lo := 4.0
-				hi := float64(imgWidth) // arbitrary upper bound
-				var chosen font.Face
-				// 12 iterations provide adequate precision and is faster
-				for i := 0; i < 12; i++ {
-					mid := (lo + hi) / 2
-					f, err := opentype.NewFace(ft, &opentype.FaceOptions{Size: mid, DPI: 72})
-					if err != nil {
-						hi = mid
-						continue
-					}
-					tmpDrawer := &font.Drawer{Dst: rgba, Src: image.NewUniform(color.RGBA{255, 255, 255, 220}), Face: f}
-					lines := wrapText(tmpDrawer, dateStr, availableWidth)
-					maxW := 0
-					for _, L := range lines {
-						w := tmpDrawer.MeasureString(L).Ceil()
-						if w > maxW {
-							maxW = w
-						}
-					}
-					if maxW <= availableWidth {
-						chosen = f
-						lo = mid
-					} else {
-						hi = mid
-					}
-				}
-				if chosen != nil {
-					face = chosen
-					drawer = &font.Drawer{Dst: rgba, Src: image.NewUniform(color.RGBA{255, 255, 255, 220}), Face: face}
+	if fontFT != nil {
+		// binary search font size in points
+		lo := 4.0
+		hi := float64(imgWidth) // arbitrary upper bound
+		var chosen font.Face
+		for i := 0; i < 12; i++ {
+			mid := (lo + hi) / 2
+			f, err := opentype.NewFace(fontFT, &opentype.FaceOptions{Size: mid, DPI: 72})
+			if err != nil {
+				hi = mid
+				continue
+			}
+			tmpDrawer := &font.Drawer{Dst: rgba, Src: image.NewUniform(color.RGBA{255, 255, 255, 220}), Face: f}
+			lines := wrapText(tmpDrawer, dateStr, availableWidth)
+			maxW := 0
+			for _, L := range lines {
+				w := tmpDrawer.MeasureString(L).Ceil()
+				if w > maxW {
+					maxW = w
 				}
 			}
+			if maxW <= availableWidth {
+				chosen = f
+				lo = mid
+			} else {
+				hi = mid
+			}
+		}
+		if chosen != nil {
+			face = chosen
+			drawer = &font.Drawer{Dst: rgba, Src: image.NewUniform(color.RGBA{255, 255, 255, 220}), Face: face}
 		}
 	}
 	if drawer == nil {
