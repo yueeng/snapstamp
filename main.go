@@ -52,17 +52,7 @@ func main() {
 		log.Fatalf("missing -in parameter\nUsage: %s -in photo.jpg|dir [-out out.jpg] [-recursive]", os.Args[0])
 	}
 
-	// detect if user provided -out as a directory (existing dir or trailing separator)
 	outIsDir := false
-	if *outPath != "" {
-		if st, err := os.Stat(*outPath); err == nil && st.IsDir() {
-			outIsDir = true
-		} else if strings.HasSuffix(*outPath, string(os.PathSeparator)) || strings.HasSuffix(*outPath, "/") {
-			outIsDir = true
-			// create if needed
-			os.MkdirAll(*outPath, 0755)
-		}
-	}
 
 	// Determine if input is dir or file
 	fi, err := os.Stat(*inPath)
@@ -71,6 +61,16 @@ func main() {
 	}
 
 	if fi.IsDir() {
+		// if input is a directory, always treat outPath as a directory
+		// (no need for user to append a trailing separator)
+		if *outPath == "" {
+			*outPath = "."
+		}
+		outIsDir = true
+		// create output dir if it doesn't exist
+		if err := os.MkdirAll(*outPath, 0755); err != nil {
+			log.Fatalf("create out dir: %v", err)
+		}
 		// walk directory and process images
 		walkFn := func(path string, d os.DirEntry, err error) error {
 			if err != nil {
