@@ -32,7 +32,7 @@ go run . -in "C:\photos\src" -out "C:\photos\dst" -concurrency 8
 
 示例
 
-- 单文件（输出为原名 + `_watermarked`）：
+-- 单文件（输出为原名 + `_timestamped`）：
 
 ```powershell
 go run . -in "photo.jpg"

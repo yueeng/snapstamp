@@ -33,8 +33,8 @@ func main() {
 	outPath := flag.StringP("out", "o", ".", "output image path (optional, only for single file)")
 	marginPercent := flag.IntP("margin", "m", 5, "margin from edges as percentage of the smaller image dimension")
 	recursive := flag.BoolP("recursive", "r", false, "when input is a directory, recurse into subdirectories")
-	fontPath := flag.StringP("font", "f", "arial.ttf", "path to .ttf font file to use for watermark (optional)")
-	widthPercent := flag.IntP("widthpercent", "w", 40, "watermark max width as percentage of image width (1-100)")
+	fontPath := flag.StringP("font", "f", "arial.ttf", "path to .ttf font file to use for stamp (optional)")
+	widthPercent := flag.IntP("widthpercent", "w", 40, "stamp max width as percentage of image width (1-100)")
 	rename := flag.BoolP("rename", "n", false, "rename output file to EXIF capture time (as filename)")
 	concurrency := flag.IntP("concurrency", "c", runtime.NumCPU(), "number of concurrent workers when processing a directory")
 	help := flag.BoolP("help", "?", false, "display help")
@@ -199,7 +199,7 @@ func main() {
 				}
 				ext := filepath.Ext(p)
 				base := fileBase(p)
-				out := filepath.Join(destDir, fmt.Sprintf("%s_watermarked%s", base, ext))
+				out := filepath.Join(destDir, fmt.Sprintf("%s_timestamped%s", base, ext))
 				outFile, err := processImage(p, out, *marginPercent, parsedFont, *widthPercent, *rename)
 				results <- struct {
 					out string
@@ -249,13 +249,13 @@ func main() {
 	if out == "" {
 		ext := filepath.Ext(*inPath)
 		name := (*inPath)[:len(*inPath)-len(ext)]
-		out = fmt.Sprintf("%s_watermarked%s", name, ext)
+		out = fmt.Sprintf("%s_timestamped%s", name, ext)
 	} else if outIsDir {
 		// place output inside specified directory
 		ext := filepath.Ext(*inPath)
 		base := fileBase(*inPath)
 		os.MkdirAll(out, 0755)
-		out = filepath.Join(out, fmt.Sprintf("%s_watermarked%s", base, ext))
+		out = filepath.Join(out, fmt.Sprintf("%s_timestamped%s", base, ext))
 	}
 	if outFile, err := processImage(*inPath, out, *marginPercent, parsedFont, *widthPercent, *rename); err != nil {
 		log.Fatalf("process image: %v", err)
@@ -276,8 +276,8 @@ func fileBase(path string) string {
 	return name[:len(name)-len(ext)]
 }
 
-// processImage reads input, extracts date, wraps text if needed, draws multi-line watermark, and writes output
-// processImage reads input, extracts date, draws watermark, and writes output.
+// processImage reads input, extracts date, wraps text if needed, draws multi-line stamp, and writes output
+// processImage reads input, extracts date, draws stamp, and writes output.
 // If rename is true, the output filename (inside outPath's directory) will be replaced
 // with a safe filename derived from the EXIF capture time.
 // Returns the actual written output path on success.
