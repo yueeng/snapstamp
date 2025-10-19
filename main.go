@@ -90,7 +90,7 @@ func main() {
 			if len(low) > 0 {
 				low = low[1:]
 			}
-			switch stringToLower(low) {
+			switch strings.ToLower(low) {
 			case "jpg", "jpeg", "png":
 				if outIsDir {
 					// build relative output path under the output dir, preserving structure
@@ -119,7 +119,16 @@ func main() {
 			}
 			return nil
 		}
-		filepath.WalkDir(*inPath, walkFn)
+		// WalkDir: record errors encountered during traversal but continue where possible
+		if err := filepath.WalkDir(*inPath, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				log.Printf("walk error %s: %v", path, err)
+				return nil
+			}
+			return walkFn(path, d, nil)
+		}); err != nil {
+			log.Fatalf("walkdir failed: %v", err)
+		}
 		return
 	}
 
@@ -144,19 +153,14 @@ func main() {
 }
 
 // helper: lowercase ascii
-func stringToLower(s string) string {
-	b := []byte(s)
-	for i := range b {
-		if b[i] >= 'A' && b[i] <= 'Z' {
-			b[i] = b[i] + 32
-		}
-	}
-	return string(b)
-}
+// using strings.ToLower from stdlib
 
 func fileBase(path string) string {
 	name := filepath.Base(path)
 	ext := filepath.Ext(name)
+	if ext == "" {
+		return name
+	}
 	return name[:len(name)-len(ext)]
 }
 
@@ -221,7 +225,8 @@ func processImage(inPath, outPath string, marginPercent int, fontPath string, wi
 				lo := 4.0
 				hi := float64(imgWidth) // arbitrary upper bound
 				var chosen font.Face
-				for range 20 {
+				// 12 iterations provide adequate precision and is faster
+				for i := 0; i < 12; i++ {
 					mid := (lo + hi) / 2
 					f, err := opentype.NewFace(ft, &opentype.FaceOptions{Size: mid, DPI: 72})
 					if err != nil {
@@ -416,7 +421,7 @@ func normalizeExifDate(s string) string {
 // wrapText splits text into lines so each line fits within maxWidth (pixels) using the provided drawer.
 func wrapText(drawer *font.Drawer, text string, maxWidth int) []string {
 	// simple greedy wrap by spaces; if a word is too long, break by characters
-	words := splitSpaces(text)
+	words := strings.Fields(text)
 	var lines []string
 	if len(words) == 0 {
 		return []string{""}
@@ -453,26 +458,6 @@ func wrapText(drawer *font.Drawer, text string, maxWidth int) []string {
 	}
 	lines = append(lines, cur)
 	return lines
-}
-
-// splitSpaces splits on spaces, preserving chunks (simple)
-func splitSpaces(s string) []string {
-	var out []string
-	cur := ""
-	for _, r := range s {
-		if r == ' ' || r == '\t' {
-			if cur != "" {
-				out = append(out, cur)
-				cur = ""
-			}
-		} else {
-			cur += string(r)
-		}
-	}
-	if cur != "" {
-		out = append(out, cur)
-	}
-	return out
 }
 
 // findSystemFont searches common system font directories for the given filename (case-insensitive)
