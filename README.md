@@ -1,4 +1,4 @@
-# Water - 照片日期水印工具
+# SnapStamp - 照片日期水印工具
 
 一个小巧的 Go 命令行工具，用于从照片 EXIF 中提取拍摄时间并在图片右下角绘制日期水印。支持单张图片处理与目录批量处理（可保留原始相对目录结构）。
 
@@ -7,7 +7,7 @@
 - 构建二进制（PowerShell）：
 
 ```powershell
-go build -o water
+go build -o snapstamp
 ```
 
 - 直接运行（单图片）：

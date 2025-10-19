@@ -1,4 +1,4 @@
-module water
+module snapstamp
 
 go 1.25.1
 
