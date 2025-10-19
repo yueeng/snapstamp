@@ -1,4 +1,2 @@
-/SRC
-/DST
-*.exe
 go.sum
+*.exe
