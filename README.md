@@ -1,46 +1,87 @@
 # Water - 照片日期水印工具
 
-这是一个 Go 命令行工具，用来读取照片 EXIF 的拍摄日期并把日期作为水印绘制到图片右下角。目标是做一个简单、可批量运行的工具，保留原图目录结构并输出带水印的文件。
+一个小巧的 Go 命令行工具，用于从照片 EXIF 中提取拍摄时间并在图片右下角绘制日期水印。支持单张图片处理与目录批量处理（可保留原始相对目录结构）。
 
-构建
+快速上手
 
-  go build
+- 构建二进制（PowerShell）：
 
-主要功能
+```powershell
+go build -o water
+```
 
-- 读取 EXIF 中 DateTimeOriginal / DateTime，若缺失则回退到文件修改时间。
-- 支持单文件或目录批量处理（支持保留相对目录结构的输出目录）。
-- 支持指定 TTF 字体（或只传字体文件名，程序会在系统字体目录尝试查找）。
-- 字体大小按图片宽度百分比自动缩放以适配水印宽度（`-widthpercent`）。
+- 直接运行（单图片）：
 
-使用示例
+```powershell
+go run . -in "C:\path\to\photo.jpg"
+```
 
-- 单张图片（默认输出为原名 + `_watermarked`）：
-  go run . -in photo.jpg
+- 批量处理目录并输出到目标目录，保留相对结构，使用 8 并发：
 
-- 指定输出路径（单文件）：
-  go run . -in photo.jpg -out out.jpg
+```powershell
+go run . -in "C:\photos\src" -out "C:\photos\dst" -concurrency 8
+```
 
-- 批量处理目录并将结果写入输出目录（保留相对结构）：
-  go run . -in ./SRC -out ./DST
+核心功能
 
+- 从 EXIF 读取 DateTimeOriginal / DateTime；若缺失则回退到文件修改时间。
+- 支持 JPG/JPEG/PNG。PNG 输入会输出为 PNG，其他格式按 JPEG 输出（质量 95）。
+- 支持自定义 TTF 字体（传完整路径或只传文件名，程序会在常见系统字体目录尝试查找）。
+- 字体大小按图片宽度自动缩放（受 `-widthpercent` 控制）。
+- 可以将输出文件重命名为 EXIF 日期（使用 `-rename`）。
 
-可用参数（重要）
+示例
 
-- -in string (必需)：输入文件或目录（支持 JPG/JPEG/PNG）。默认 `.`。
-- -out string：输出文件或目录。可为单一输出文件路径（单文件模式），也可为目标目录（若为目录，程序在目录下写入处理后的文件并保留输入的相对路径）。默认 `.`。
-- -margin int：水印与图片边缘的间距，改为占较短边的百分比（整数百分比），默认 `2`（即较短边的 2%）。
-- -recursive bool：当 `-in` 为目录时是否递归遍历子目录，默认 `false`。
-- -font string：TTF 字体文件路径或字体文件名（例如 `arial.ttf`）。若只提供文件名，程序会在常见系统字体目录（Windows: C:\\Windows\\Fonts，macOS/Linux 的标准目录）尝试查找该文件；若加载失败，会回退到内置位图字体 `basicfont.Face7x13`。
-- -widthpercent int：水印最大宽度占图片宽度的百分比（1-100），默认 `40`（即 40%）。
+- 单文件（输出为原名 + `_watermarked`）：
 
+```powershell
+go run . -in "photo.jpg"
+```
 
-注意
+- 单文件并指定输出：
 
-- 当程序从 EXIF 中读取到的时间字段格式为常见 EXIF 形式（如 `2006:01:02 15:04:05`）时，会把年月日中的冒号替换为短横以便更易读（变为 `2006-01-02 15:04:05`）。
-- 文本换行：程序会尝试按空格贪婪换行，若单个词过长则按字符拆分以保证每行不超出指定宽度。
-- 阴影与颜色：当前实现会在白色主文字下绘制一个黑色阴影（在 `main.go` 中通过偏移 5 像素实现）。
-- 输出格式：若输入为 PNG，则输出为 PNG；其它格式（常见 JPEG）按 JPEG 输出，质量设置为 95。
-- 如果你希望我从代码中移除或添加额外参数（例如背景块、阴影颜色可选项等），请说明，我可以同步修改 `main.go` 并重新编译/测试。
+```powershell
+go run . -in "photo.jpg" -out "photo_out.jpg"
+```
 
-如果你希望我加入或移除其它参数（例如背景块、阴影颜色等），请明确说明要保留或删除的选项，我会按此更新代码与文档。
+- 目录（递归）处理示例：
+
+```powershell
+go run . -in "C:\photos\src" -out "C:\photos\dst" -recursive -concurrency 4
+```
+
+- 使用系统字体（例如 `arial.ttf`）：
+
+```powershell
+go run . -in "photo.jpg" -font "arial.ttf"
+```
+
+重要参数说明
+
+- -in string (必需)：输入文件或目录（支持 JPG/JPEG/PNG）。
+- -out string：输出文件或目录（当输入为目录时应为目录）。
+- -margin int：水印与图片边缘距离，按较短边的百分比计算，默认 5。
+- -recursive bool：目录是否递归，默认 false。
+- -font string：TTF 字体路径或文件名（例如 `arial.ttf`）。若只传文件名，程序会在系统字体目录查找；若失败回退到内置小字体。
+- -widthpercent int：水印最大宽度占图片宽度百分比（1-100），默认 40。
+- -rename bool：以 EXIF 日期重命名输出文件（若冲突会自动添加后缀）。
+- -concurrency int：并发 worker 数，默认使用 CPU 核心数。
+
+常见问题（FAQ）
+
+- Q: 程序提示无法加载字体或加载失败，如何处理？
+  - A: 建议传入字体完整路径（例如 `C:\Windows\Fonts\arial.ttf`）。如果只给文件名，程序会在系统字体目录（Windows: `C:\Windows\Fonts`）尝试查找。字体加载失败不会使处理停止，程序会回退到 `basicfont.Face7x13`。
+
+- Q: 图片没有 EXIF 时间怎么办？
+  - A: 程序会使用文件系统的修改时间作为回退；若也不可用则使用当前时间作为水印文本。
+
+- Q: 想定制水印样式（颜色、半透明背景、阴影等），需要怎么改？
+  - A: 目前内置的是白色描边 + 黑色填充。若要更多样式，我可以在 `main.go` 中添加参数（例如 `-color`, `-bg`, `-alpha`, `-shadow`）并实现这些样式。
+
+- Q: 能否支持更多图片格式（WebP/HEIC）？
+  - A: WebP 可以通过引入纯 Go 库支持。HEIC/HEIF 通常需要 `libheif` 及 cgo 支持（平台依赖），如果你需要我可以帮你调研并集成。
+
+性能与故障排查
+
+- 若处理大量大图像，建议将 `-concurrency` 设置得较低以减少同时内存占用。
+- 若遇到 I/O 瓶颈，优先排查磁盘速度与并发数量。
