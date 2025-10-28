@@ -27,7 +27,7 @@ go run . -in "C:\photos\src" -out "C:\photos\dst" -concurrency 8
 - 从 EXIF 读取 DateTimeOriginal / DateTime；若缺失则回退到文件修改时间。
 - 支持 JPG/JPEG/PNG。PNG 输入会输出为 PNG，其他格式按 JPEG 输出（质量 95）。
 - 支持自定义 TTF 字体（传完整路径或只传文件名，程序会在常见系统字体目录尝试查找）。
-- 字体大小按图片宽度自动缩放（受 `-widthpercent` 控制）。
+- 字体大小按所选图片边长度自动缩放（受 `-widthpercent` 控制，见 `-side` 参数）。
 - 可以将输出文件重命名为 EXIF 日期（使用 `-rename`）。
 
 示例
@@ -60,10 +60,14 @@ go run . -in "photo.jpg" -font "arial.ttf"
 
 - -in string (必需)：输入文件或目录（支持 JPG/JPEG/PNG）。
 - -out string：输出文件或目录（当输入为目录时应为目录）。
-- -margin int：水印与图片边缘距离，按较短边的百分比计算，默认 5。
+- -margin int：水印与图片边缘距离，按所选边的百分比计算（参见 `-side`），默认 5。
 - -recursive bool：目录是否递归，默认 false。
 - -font string：TTF 字体路径或文件名（例如 `arial.ttf`）。若只传文件名，程序会在系统字体目录查找；若失败回退到内置小字体。
-- -widthpercent int：水印最大宽度占图片宽度百分比（1-100），默认 40。
+- -widthpercent int：水印最大宽度占所选边长度的百分比（1-100），默认 40。
+- -side string：选择用于 `-margin` 与 `-widthpercent` 计算的图片边：`width` | `long` | `short`，默认 `width`。
+  - `width`：使用图片宽度（默认，兼容旧行为）。
+  - `long`：使用图片的长边（max(width,height)）。
+  - `short`：使用图片的短边（min(width,height)）。
 - -rename bool：以 EXIF 日期重命名输出文件（若冲突会自动添加后缀）。
 - -concurrency int：并发 worker 数，默认使用 CPU 核心数。
 

@@ -31,10 +31,11 @@ import (
 func main() {
 	inPath := flag.StringP("in", "i", ".", "input image path or directory (jpg/png)")
 	outPath := flag.StringP("out", "o", ".", "output image path (optional, only for single file)")
-	marginPercent := flag.IntP("margin", "m", 5, "margin from edges as percentage of the smaller image dimension")
+	marginPercent := flag.IntP("margin", "m", 5, "margin from edges as percentage of the chosen image side (see --side)")
 	recursive := flag.BoolP("recursive", "r", false, "when input is a directory, recurse into subdirectories")
 	fontPath := flag.StringP("font", "f", "arial.ttf", "path to .ttf font file to use for stamp (optional)")
-	widthPercent := flag.IntP("widthpercent", "w", 40, "stamp max width as percentage of image width (1-100)")
+	widthPercent := flag.IntP("widthpercent", "w", 40, "stamp max width as percentage of the chosen image side (1-100)")
+	side := flag.StringP("side", "s", "width", "which image side to use for margin/width calculations: width|long|short (default: width)")
 	rename := flag.BoolP("rename", "n", false, "rename output file to EXIF capture time (as filename)")
 	concurrency := flag.IntP("concurrency", "c", runtime.NumCPU(), "number of concurrent workers when processing a directory")
 	help := flag.BoolP("help", "?", false, "display help")
@@ -200,7 +201,7 @@ func main() {
 				ext := filepath.Ext(p)
 				base := fileBase(p)
 				out := filepath.Join(destDir, fmt.Sprintf("%s_timestamped%s", base, ext))
-				outFile, err := processImage(p, out, *marginPercent, parsedFont, *widthPercent, *rename)
+				outFile, err := processImage(p, out, *marginPercent, parsedFont, *widthPercent, *side, *rename)
 				results <- struct {
 					out string
 					err error
@@ -257,7 +258,7 @@ func main() {
 		os.MkdirAll(out, 0755)
 		out = filepath.Join(out, fmt.Sprintf("%s_timestamped%s", base, ext))
 	}
-	if outFile, err := processImage(*inPath, out, *marginPercent, parsedFont, *widthPercent, *rename); err != nil {
+	if outFile, err := processImage(*inPath, out, *marginPercent, parsedFont, *widthPercent, *side, *rename); err != nil {
 		log.Fatalf("process image: %v", err)
 	} else {
 		fmt.Printf("wrote %s\n", outFile)
@@ -281,7 +282,7 @@ func fileBase(path string) string {
 // If rename is true, the output filename (inside outPath's directory) will be replaced
 // with a safe filename derived from the EXIF capture time.
 // Returns the actual written output path on success.
-func processImage(inPath, outPath string, marginPercent int, fontFT *opentype.Font, widthPercent int, rename bool) (string, error) {
+func processImage(inPath, outPath string, marginPercent int, fontFT *opentype.Font, widthPercent int, side string, rename bool) (string, error) {
 	// Open file once and use stream for EXIF and image decoding to avoid reading whole file into memory
 	f, err := os.Open(inPath)
 	if err != nil {
@@ -334,14 +335,29 @@ func processImage(inPath, outPath string, marginPercent int, fontFT *opentype.Fo
 	var face font.Face
 	var drawer *font.Drawer
 	imgWidth := bounds.Dx()
-	availableWidth := max(imgWidth*widthPercent/100, 10)
+	imgHeight := bounds.Dy()
+
+	// determine which side length to use for margin/width calculations
+	sideLower := strings.ToLower(side)
+	var sideLen int
+	switch sideLower {
+	case "l", "long":
+		sideLen = max(imgWidth, imgHeight)
+	case "s", "short":
+		sideLen = min(imgWidth, imgHeight)
+	default:
+		// default and "width" -> use image width
+		sideLen = imgWidth
+	}
+
+	availableWidth := max(sideLen*widthPercent/100, 10)
 
 	if fontFT != nil {
 		// binary search font size in points
 		lo := 4.0
 		hi := float64(imgWidth) // arbitrary upper bound
 		var chosen font.Face
-		for i := 0; i < 12; i++ {
+		for range 12 {
 			mid := (lo + hi) / 2
 			f, err := opentype.NewFace(fontFT, &opentype.FaceOptions{Size: mid, DPI: 72})
 			if err != nil {
@@ -380,10 +396,8 @@ func processImage(inPath, outPath string, marginPercent int, fontFT *opentype.Fo
 	ascent := metrics.Ascent.Ceil()
 	descent := metrics.Descent.Ceil()
 	lineHeight := ascent + descent
-	// convert marginPercent to pixel margin using the smaller image dimension
-	imgHeight := bounds.Dy()
-	smaller := min(imgWidth, imgHeight)
-	pixelMargin := max(smaller*marginPercent/100, 1)
+	// convert marginPercent to pixel margin using the chosen side length
+	pixelMargin := max(sideLen*marginPercent/100, 1)
 
 	// starting y for the first (top) line of the block so that block bottom is pixelMargin above bottom
 	startY := max(bounds.Max.Y-pixelMargin-descent-(len(lines)-1)*lineHeight, ascent+pixelMargin)
